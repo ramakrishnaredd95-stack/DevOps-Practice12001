@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform init *)",
+      "Bash(terraform plan *)",
+      "Bash(terraform apply *)",
+      "Bash(az aks *)",
+      "Bash(helm list *)",
+      "Bash(helm history *)",
+      "Bash(kubectl get pods *)",
+      "Bash(helm upgrade *)",
+      "Bash(kubectl get *)"
+    ]
+  }
+}
