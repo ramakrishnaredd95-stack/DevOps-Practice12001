@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: boutiqueacr.azurecr.io/frontend:latest
+          image: boutiqueacr.azurecr.io/frontend:f3b942f7978bdf7f33d0bf75db559ee8de8765a3
           ports:
             - containerPort: 3000
           env:
