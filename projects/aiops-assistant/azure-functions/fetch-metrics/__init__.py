@@ -45,7 +45,6 @@ def prometheus_range_query(query, hours_back, step="5m"):
 def main(req: func.HttpRequest) -> func.HttpResponse:
     """
     Azure Function to fetch metrics from Prometheus.
-    Replaces AWS Lambda fetch_metrics function.
     """
     try:
         # Parse request body

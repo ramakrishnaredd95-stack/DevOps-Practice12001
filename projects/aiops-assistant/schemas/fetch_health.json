@@ -1,32 +1,32 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "EKS Health Checker",
-    "version": "1.0.0",
-    "description": "Checks health status of an EKS cluster including node groups, deployments, and pod restarts"
+    "title": "AKS Health Checker",
+    "version": "2.0.0",
+    "description": "Checks health status of AKS workloads using Prometheus and kube-state-metrics."
   },
   "paths": {
-    "/fetch_service_health": {
-      "get": {
-        "summary": "Check EKS cluster health",
-        "description": "Checks the health of an EKS cluster — cluster status, node group health, unhealthy or scaled-down deployments, and crashing pods. Use this when the user asks if services are running, if pods are healthy, if anything is down, or for a general system health check. Default cluster is eks-cluster and default namespace is boutique.",
+    "/fetch-health": {
+      "post": {
+        "summary": "Check AKS workload health",
+        "description": "Checks deployment availability, pod restarts, CPU, and memory for an AKS namespace. Use this when the user asks if services are running, pods are healthy, deployments are unavailable, or anything is down.",
         "operationId": "fetch_service_health",
         "parameters": [
           {
             "name": "cluster_name",
             "in": "query",
             "required": false,
-            "description": "EKS cluster name to check. Defaults to eks-cluster.",
+            "description": "AKS cluster name to report in the response.",
             "schema": {
               "type": "string",
-              "default": "eks-cluster"
+              "default": "boutique-aks"
             }
           },
           {
             "name": "namespace",
             "in": "query",
             "required": false,
-            "description": "Kubernetes namespace to check deployments and pods in. Defaults to boutique.",
+            "description": "Kubernetes namespace to check deployments and pods in.",
             "schema": {
               "type": "string",
               "default": "boutique"
@@ -35,15 +35,17 @@
         ],
         "responses": {
           "200": {
-            "description": "EKS cluster health status",
+            "description": "AKS workload health status",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status": { "type": "string" },
-                    "overall_healthy": { "type": "boolean" },
-                    "details": { "type": "object" }
+                    "cluster_healthy": { "type": "boolean" },
+                    "deployments": { "type": "array" },
+                    "unhealthy_deployments": { "type": "array" },
+                    "crashing_pods": { "type": "array" },
+                    "resource_usage": { "type": "array" }
                   }
                 }
               }

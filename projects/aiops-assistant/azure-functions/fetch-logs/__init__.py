@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 def main(req: func.HttpRequest) -> func.HttpResponse:
     """
     Azure Function to fetch logs from Azure Log Analytics.
-    Replaces AWS Lambda fetch_logs function.
     """
     try:
         # Parse request body
@@ -57,7 +56,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         {log_table}
         | where TimeGenerated >= datetime({start_time.isoformat()})
         | where TimeGenerated <= datetime({end_time.isoformat()})
-        | where LogMessage contains "{filter_pattern}"
+        | extend Message = coalesce(
+            tostring(column_ifexists("LogMessage", "")),
+            tostring(column_ifexists("LogEntry", "")),
+            tostring(column_ifexists("Message", ""))
+          )
+        | where Message contains "{filter_pattern}"
+        | project TimeGenerated, Message
         | order by TimeGenerated desc
         | limit 50
         """

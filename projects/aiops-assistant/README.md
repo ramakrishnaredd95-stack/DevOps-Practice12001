@@ -1,138 +1,91 @@
-# AIOps Assistant — Kira
+# AIOps Assistant - Kira
 
-An AI-powered SRE assistant built on AWS Bedrock Agent. Kira diagnoses production incidents by querying CloudWatch Logs, CloudWatch Metrics (via Prometheus), and EKS cluster health — then responds with root cause, evidence, and fix recommendations.
-
----
+An Azure-focused SRE assistant for the boutique AKS deployment. Kira checks Azure Log Analytics, Prometheus metrics, and AKS workload health, then shows the evidence in a Streamlit chat UI.
 
 ## Architecture
 
-```
+```text
 Streamlit UI (app.py)
-      │
-      ▼
-Bedrock Agent (Kira)
-      │
-      ├── fetch_logs         → CloudWatch Logs
-      ├── fetch_metrics      → Prometheus (ELB endpoint)
-      └── fetch_service_health → EKS cluster + node groups
+      |
+      v
+Azure Functions
+      |-- fetch-logs    -> Azure Log Analytics
+      |-- fetch-metrics -> Prometheus
+      `-- fetch-health  -> AKS workload health via Prometheus
 ```
-
----
 
 ## Prerequisites
 
-- AWS account with access to Bedrock (model access enabled for your chosen model)
-- EKS cluster running with Prometheus exposed via a LoadBalancer service
-- AWS CLI configured (`aws configure`)
+- Azure CLI installed and logged in with `az login`
+- AKS cluster from the Terraform Azure stack
+- Log Analytics workspace connected to AKS
+- Prometheus with kube-state-metrics available to the Azure Functions
+- Azure Functions Core Tools if publishing from your machine
 - Python 3.10+
 
----
+## Step 1: Set Up Azure Access
 
-## Step 1: Set Up IAM Roles
-
-Run the provided script to create both required IAM roles:
+Run the setup script:
 
 ```bash
 chmod +x setup-iam.sh
 ./setup-iam.sh
 ```
 
-This creates:
-
-| Role | Used By | Permissions |
-|------|---------|-------------|
-| `aiops-lambda-role` | All 3 Lambda functions | CloudWatch Logs read, EKS describe, Lambda basic execution |
-| `aiops-bedrock-agent-role` | Bedrock Agent | Invoke the 3 Lambda functions, invoke Bedrock models |
-
----
-
-## Step 2: Create the Lambda Functions
-
-Create the following 3 Lambda functions in the AWS Console (or via CLI). Use the code from the `lambda/` directory.
-
-| Function Name | Code File | Execution Role |
-|---------------|-----------|----------------|
-| `aiops-fetch-logs` | `lambda/fetch_logs/lambda_function.py` | `aiops-lambda-role` |
-| `aiops-fetch-metrics` | `lambda/fetch_metrics/lambda_function.py` | `aiops-lambda-role` |
-| `aiops-fetch-health` | `lambda/fetch_health/lambda_function.py` | `aiops-lambda-role` |
-
-Runtime: **Python 3.12** | Timeout: **30 seconds**
-
----
-
-## Step 3: Update the Prometheus URL
-
-Both `fetch_metrics` and `fetch_health` lambdas query Prometheus directly. Update the `PROMETHEUS_URL` placeholder in each file before uploading the code.
-
-In `lambda/fetch_metrics/lambda_function.py`:
-```python
-PROMETHEUS_URL = "http://<YOUR_PROMETHEUS_ELB_URL>:9090"
-```
-
-In `lambda/fetch_health/lambda_function.py`:
-```python
-PROMETHEUS_URL = "http://<YOUR_PROMETHEUS_ELB_URL>:9090"
-```
-
-To get the Prometheus ELB URL, expose Prometheus as a LoadBalancer service:
+Useful overrides:
 
 ```bash
-kubectl patch svc kube-prometheus-stack-prometheus -n monitoring \
-  -p '{"spec": {"type": "LoadBalancer"}}'
-
-kubectl get svc kube-prometheus-stack-prometheus -n monitoring
-# Copy the EXTERNAL-IP value — that is your ELB URL
+RESOURCE_GROUP=boutique-rg \
+AKS_CLUSTER_NAME=boutique-aks \
+FUNCTION_APP_NAME=<your-function-app-name> \
+PROMETHEUS_URL=http://<prometheus-loadbalancer>:9090 \
+./setup-iam.sh
 ```
 
----
+The script creates or reuses a service principal and grants it `Log Analytics Reader` on the workspace. If `FUNCTION_APP_NAME` is set, it also writes the required Function App settings.
 
-## Step 4: Deploy the Bedrock Agent
+## Step 2: Deploy Azure Functions
 
-Run the deploy script. It will:
-- Verify the Lambda functions and IAM role exist
-- Set Lambda timeouts to 30s and add Bedrock invoke permissions
-- Create the Bedrock Agent (`aiops-assistant`) with the Kira system prompt
-- Attach all 3 action groups with their OpenAPI schemas
-- Prepare the agent
+The Azure Function code lives in `azure-functions/`:
+
+| Route | Folder | Purpose |
+|---|---|---|
+| `/api/fetch-logs` | `azure-functions/fetch-logs` | Query Azure Log Analytics |
+| `/api/fetch-metrics` | `azure-functions/fetch-metrics` | Query Prometheus metrics |
+| `/api/fetch-health` | `azure-functions/fetch-health` | Check AKS workload health |
+
+Publish from the function folder:
 
 ```bash
-chmod +x deploy.sh
-./deploy.sh
+cd azure-functions
+func azure functionapp publish <your-function-app-name>
 ```
 
-At the end, the script prints your **Agent ID** — keep it for the next step.
+Required Function App settings:
 
----
-
-## Step 5: (Optional) Generate Sample Data
-
-Populate CloudWatch Logs with realistic error scenarios to test Kira:
-
-```bash
-python3 scripts/generate_sample_data.py --region us-east-1
+```env
+LOG_ANALYTICS_WORKSPACE_ID=<workspace-customer-id>
+AZURE_TENANT_ID=<tenant-id>
+AZURE_CLIENT_ID=<service-principal-client-id>
+AZURE_CLIENT_SECRET=<service-principal-client-secret>
+PROMETHEUS_URL=http://<prometheus-loadbalancer>:9090
 ```
 
-This writes 100 realistic log events (503 errors, OOM kills, connection pool exhaustion, etc.) to `/app/production`.
-
----
-
-## Step 6: Run the Streamlit UI
+## Step 3: Run the Streamlit UI
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and fill in your values:
+Set these values:
 
 ```env
-AWS_REGION=us-east-1
-BEDROCK_AGENT_ID=<YOUR_AGENT_ID>
-BEDROCK_AGENT_ALIAS_ID=TSTALIASID
-
-# Optional — omit to use your AWS CLI profile / SSO / IAM role:
-# AWS_ACCESS_KEY_ID=<YOUR_ACCESS_KEY>
-# AWS_SECRET_ACCESS_KEY=<YOUR_SECRET_KEY>
-# AWS_SESSION_TOKEN=<YOUR_SESSION_TOKEN>
+AZURE_FETCH_LOGS_URL=https://<app>.azurewebsites.net/api/fetch-logs
+AZURE_FETCH_METRICS_URL=https://<app>.azurewebsites.net/api/fetch-metrics
+AZURE_FETCH_HEALTH_URL=https://<app>.azurewebsites.net/api/fetch-health
+AZURE_REGION=eastus
+AKS_CLUSTER_NAME=boutique-aks
+K8S_NAMESPACE=boutique
 ```
 
 Install dependencies and start the UI:
@@ -142,85 +95,74 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open **http://localhost:8501** in your browser.
+Open `http://localhost:8501`.
 
----
+## Step 4: Test Function Payloads
+
+Print a sample payload:
+
+```bash
+python scripts/generate_sample_data.py --tool logs
+```
+
+Call a deployed function:
+
+```bash
+python scripts/generate_sample_data.py \
+  --tool health \
+  --url https://<app>.azurewebsites.net/api/fetch-health
+```
 
 ## Project Structure
 
-```
+```text
 aiops-assistant/
-├── app.py                  # Streamlit chat UI
-├── deploy.sh               # Bedrock Agent deployment script
-├── setup-iam.sh            # IAM roles and policies setup
-├── requirements.txt        # Python dependencies
-├── .env.example            # Environment variable template
-├── lambda/
-│   ├── fetch_logs/         # CloudWatch Logs query
-│   ├── fetch_metrics/      # Prometheus metrics query
-│   └── fetch_health/       # EKS cluster health check
-├── schemas/
-│   ├── fetch_logs.json     # OpenAPI schema for fetch_logs
-│   ├── fetch_metrics.json  # OpenAPI schema for fetch_metrics
-│   └── fetch_health.json   # OpenAPI schema for fetch_health
-└── scripts/
-    └── generate_sample_data.py  # Seed CloudWatch with test errors
+|-- app.py                    # Streamlit chat UI for Azure Functions
+|-- setup-iam.sh              # Azure RBAC and Function App settings setup
+|-- requirements.txt          # Streamlit UI dependencies
+|-- .env.example              # Local UI environment template
+|-- azure-functions/
+|   |-- fetch-logs/           # Azure Log Analytics query
+|   |-- fetch-metrics/        # Prometheus metrics query
+|   `-- fetch-health/         # AKS workload health check
+|-- schemas/
+|   |-- fetch_logs.json       # OpenAPI schema for fetch-logs
+|   |-- fetch_metrics.json    # OpenAPI schema for fetch-metrics
+|   `-- fetch_health.json     # OpenAPI schema for fetch-health
+`-- scripts/
+    `-- generate_sample_data.py
 ```
 
----
+## Sample Questions
 
-## Sample Questions to Ask Kira
-
-- Why are we seeing 503 errors in the last hour?
+- Why are we seeing 503 errors?
 - Is CPU usage high across the boutique services?
-- Check database connections and latency
-- Are all pods healthy? Any restarts?
-- What are the most frequent errors in the last 2 hours?
+- Are all pods healthy?
+- What errors happened in the last 2 hours?
+- Is there a memory issue?
 
----
+## Troubleshooting
 
-## Potential Issues
+### Azure Functions cannot query Log Analytics
 
-### Bedrock model access not enabled
-The deploy script will fail at agent creation if model access hasn't been requested. Go to **AWS Console → Bedrock → Model access** and enable access for the model used in `deploy.sh` before running the script.
-
-### Prometheus URL unreachable from Lambda
-`fetch_metrics` and `fetch_health` make outbound HTTP calls to the Prometheus ELB. If Lambda is deployed inside a VPC without a NAT gateway or internet gateway route, these calls will time out. Either:
-- Keep Lambda outside a VPC (default), or
-- Ensure the VPC has a route to the internet and the Prometheus ELB security group allows inbound on port 9090.
-
-### Agent stuck in PREPARING state
-After running `deploy.sh`, the agent status shows `PREPARING`. This is normal and takes 30–60 seconds. If it stays in this state, check the Bedrock console for validation errors — usually caused by a malformed OpenAPI schema or a Lambda ARN that doesn't exist.
-
-### Streamlit shows "NOT CONFIGURED"
-The app requires `BEDROCK_AGENT_ID` and `BEDROCK_AGENT_ALIAS_ID` to be set in `.env`. If you started Streamlit before populating `.env`, stop it and restart — `load_dotenv()` only reads the file at startup.
+Check that the Function App has these settings:
 
 ```bash
-# Stop and restart
-pkill -f "streamlit run app.py"
-streamlit run app.py
+az functionapp config appsettings list \
+  --resource-group boutique-rg \
+  --name <your-function-app-name>
 ```
 
-### fetch_logs returns no results
-The default log group is `/eks/boutique/pods`. This group is only created after Fluent Bit starts shipping logs. Make sure `aws-for-fluent-bit` is running:
+Also confirm the service principal has `Log Analytics Reader` on the workspace.
 
-```bash
-kubectl get pods -n amazon-cloudwatch
-```
+### Prometheus URL is unreachable
 
-If the log group doesn't exist yet, run the sample data generator first (Step 5) which creates `/app/production`.
+`fetch-metrics` and `fetch-health` call `PROMETHEUS_URL` directly. Make sure the Function App can reach that URL and that Prometheus allows inbound traffic from the Function App networking path.
 
-### fetch_health uses wrong cluster name
-The Lambda defaults to cluster name `eks-cluster`. If your cluster has a different name, update `DEFAULT_CLUSTER` in `lambda/fetch_health/lambda_function.py` before uploading the function code.
+### Streamlit shows NOT CONFIGURED
 
-### Lambda execution role missing permissions
-If `fetch_health` returns an access denied error on `eks:DescribeCluster`, the inline policy may not have propagated yet (IAM can take ~10–15 seconds). Wait and retry. If it persists, verify the inline policy is attached:
+The UI needs all three Azure Function URLs in `.env`. Restart Streamlit after editing `.env`.
 
-```bash
-aws iam get-role-policy \
-  --role-name aiops-lambda-role \
-  --policy-name aiops-lambda-inline-policy
-```
+### No logs are returned
 
-### AWS credentials not resolving in Streamlit
-If `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are left blank in `.env`, boto3 falls back to the default credential chain (`~/.aws/credentials`, environment variables, IAM role). If none of those are configured, Bedrock calls will fail with an auth error. Either fill in the credentials in `.env` or ensure your terminal session has valid AWS credentials before starting Streamlit.
+Confirm the table name used by `fetch-logs`. Some AKS setups use `ContainerLogV2` instead of `ContainerLog`.

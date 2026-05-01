@@ -100,7 +100,6 @@ def check_aks_health(cluster_name, k8s_namespace):
 def main(req: func.HttpRequest) -> func.HttpResponse:
     """
     Azure Function to fetch AKS cluster health.
-    Replaces AWS Lambda fetch_health function.
     """
     try:
         # Parse request body

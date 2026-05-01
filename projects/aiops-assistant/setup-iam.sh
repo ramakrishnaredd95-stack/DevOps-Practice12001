@@ -1,197 +1,165 @@
 #!/usr/bin/env bash
 # =============================================================================
-# AIOps Assistant — IAM Setup Script
+# AIOps Assistant - Azure setup script
 #
-# Creates all IAM roles and policies required for the project:
-#   1. aiops-lambda-role       — used by all 3 Lambda functions
-#   2. aiops-bedrock-agent-role — used by the Bedrock Agent
+# This prepares Azure access for the
+# AIOps Azure Functions that read Log Analytics and query Prometheus.
+#
+# What it does:
+#   1. Reads the current Azure subscription and tenant.
+#   2. Finds the Log Analytics workspace used by AKS.
+#   3. Creates or reuses an Azure AD application/service principal.
+#   4. Grants the service principal Log Analytics Reader on the workspace.
+#   5. Optionally writes app settings to an Azure Function App.
 #
 # Usage:
+#   az login
 #   chmod +x setup-iam.sh
 #   ./setup-iam.sh
+#
+# Optional environment overrides:
+#   RESOURCE_GROUP=boutique-rg
+#   AKS_CLUSTER_NAME=boutique-aks
+#   LOG_ANALYTICS_WORKSPACE_NAME=boutique-aks-logs
+#   AIOPS_APP_NAME=aiops-functions-reader
+#   FUNCTION_APP_NAME=<your-function-app-name>
+#   PROMETHEUS_URL=http://<prometheus-loadbalancer>:9090
 # =============================================================================
 
 set -euo pipefail
 
-REGION="us-east-1"
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+RESOURCE_GROUP="${RESOURCE_GROUP:-boutique-rg}"
+AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-boutique-aks}"
+LOG_ANALYTICS_WORKSPACE_NAME="${LOG_ANALYTICS_WORKSPACE_NAME:-${AKS_CLUSTER_NAME}-logs}"
+AIOPS_APP_NAME="${AIOPS_APP_NAME:-aiops-functions-reader}"
+FUNCTION_APP_NAME="${FUNCTION_APP_NAME:-}"
+PROMETHEUS_URL="${PROMETHEUS_URL:-}"
 
-echo ""
-echo "============================================="
-echo " AIOps — IAM Setup"
-echo " Account : $ACCOUNT_ID"
-echo " Region  : $REGION"
-echo "============================================="
-echo ""
-
-# =============================================================================
-# ROLE 1: aiops-lambda-role
-# Used by: aiops-fetch-logs, aiops-fetch-metrics, aiops-fetch-health
-# =============================================================================
-LAMBDA_ROLE_NAME="aiops-lambda-role"
-
-echo "[1/2] Creating IAM role: $LAMBDA_ROLE_NAME"
-
-LAMBDA_TRUST_POLICY=$(cat <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "lambda.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1"
+    exit 1
+  fi
 }
-EOF
-)
 
-if aws iam get-role --role-name "$LAMBDA_ROLE_NAME" &>/dev/null; then
-  echo "  ✓ Role already exists: $LAMBDA_ROLE_NAME"
-else
-  aws iam create-role \
-    --role-name "$LAMBDA_ROLE_NAME" \
-    --assume-role-policy-document "$LAMBDA_TRUST_POLICY" \
-    --description "Role for AIOps Lambda functions — fetch logs, metrics, and EKS health" \
-    --query 'Role.RoleName' --output text
-  echo "  ✓ Created: $LAMBDA_ROLE_NAME"
+require_command az
+
+if ! az account show >/dev/null 2>&1; then
+  echo "Azure CLI is not logged in. Run: az login"
+  exit 1
 fi
 
-# Attach managed policy for basic Lambda execution (CloudWatch Logs write)
-aws iam attach-role-policy \
-  --role-name "$LAMBDA_ROLE_NAME" \
-  --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-echo "  ✓ Attached: AWSLambdaBasicExecutionRole"
-
-# Inline policy for reading CloudWatch Logs and EKS health
-LAMBDA_INLINE_POLICY=$(cat <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "CloudWatchLogsRead",
-      "Effect": "Allow",
-      "Action": [
-        "logs:FilterLogEvents",
-        "logs:StartQuery",
-        "logs:GetQueryResults",
-        "logs:StopQuery",
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "EKSRead",
-      "Effect": "Allow",
-      "Action": [
-        "eks:DescribeCluster",
-        "eks:ListNodegroups",
-        "eks:DescribeNodegroup"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-EOF
-)
-
-aws iam put-role-policy \
-  --role-name "$LAMBDA_ROLE_NAME" \
-  --policy-name "aiops-lambda-inline-policy" \
-  --policy-document "$LAMBDA_INLINE_POLICY"
-echo "  ✓ Inline policy applied: CloudWatch Logs read + EKS describe"
-
-# =============================================================================
-# ROLE 2: aiops-bedrock-agent-role
-# Used by: Bedrock Agent (aiops-assistant)
-# =============================================================================
-AGENT_ROLE_NAME="aiops-bedrock-agent-role"
+SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+TENANT_ID="$(az account show --query tenantId -o tsv)"
 
 echo ""
-echo "[2/2] Creating IAM role: $AGENT_ROLE_NAME"
+echo "============================================="
+echo " AIOps - Azure Setup"
+echo " Subscription : $SUBSCRIPTION_ID"
+echo " Tenant       : $TENANT_ID"
+echo " Resource RG  : $RESOURCE_GROUP"
+echo " AKS Cluster  : $AKS_CLUSTER_NAME"
+echo " Log Workspace: $LOG_ANALYTICS_WORKSPACE_NAME"
+echo "============================================="
+echo ""
 
-BEDROCK_TRUST_POLICY=$(cat <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "bedrock.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole",
-      "Condition": {
-        "StringEquals": {
-          "aws:SourceAccount": "$ACCOUNT_ID"
-        }
-      }
-    }
-  ]
-}
-EOF
-)
+echo "[1/4] Checking Azure resources..."
+WORKSPACE_ID="$(az monitor log-analytics workspace show \
+  --resource-group "$RESOURCE_GROUP" \
+  --workspace-name "$LOG_ANALYTICS_WORKSPACE_NAME" \
+  --query customerId -o tsv)"
 
-if aws iam get-role --role-name "$AGENT_ROLE_NAME" &>/dev/null; then
-  echo "  ✓ Role already exists: $AGENT_ROLE_NAME"
+WORKSPACE_RESOURCE_ID="$(az monitor log-analytics workspace show \
+  --resource-group "$RESOURCE_GROUP" \
+  --workspace-name "$LOG_ANALYTICS_WORKSPACE_NAME" \
+  --query id -o tsv)"
+
+AKS_ID="$(az aks show \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$AKS_CLUSTER_NAME" \
+  --query id -o tsv)"
+
+echo "  Found Log Analytics workspace: $WORKSPACE_ID"
+echo "  Found AKS cluster: $AKS_ID"
+
+echo ""
+echo "[2/4] Creating or reusing service principal: $AIOPS_APP_NAME"
+APP_ID="$(az ad app list --display-name "$AIOPS_APP_NAME" --query '[0].appId' -o tsv)"
+
+if [ -z "$APP_ID" ]; then
+  SP_OUTPUT="$(az ad sp create-for-rbac \
+    --name "$AIOPS_APP_NAME" \
+    --role "Log Analytics Reader" \
+    --scopes "$WORKSPACE_RESOURCE_ID" \
+    -o json)"
+  CLIENT_ID="$(echo "$SP_OUTPUT" | tr -d '\r' | sed -n 's/.*"appId": "\([^"]*\)".*/\1/p')"
+  CLIENT_SECRET="$(echo "$SP_OUTPUT" | tr -d '\r' | sed -n 's/.*"password": "\([^"]*\)".*/\1/p')"
+  echo "  Created service principal: $CLIENT_ID"
 else
-  aws iam create-role \
-    --role-name "$AGENT_ROLE_NAME" \
-    --assume-role-policy-document "$BEDROCK_TRUST_POLICY" \
-    --description "Role for Bedrock Agent — AIOps assistant (Kira)" \
-    --query 'Role.RoleName' --output text
-  echo "  ✓ Created: $AGENT_ROLE_NAME"
+  CLIENT_ID="$APP_ID"
+  CLIENT_SECRET=""
+  echo "  Reusing existing service principal: $CLIENT_ID"
 fi
 
-# Inline policy for invoking Lambda functions and Bedrock models
-AGENT_INLINE_POLICY=$(cat <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "InvokeLambdaFunctions",
-      "Effect": "Allow",
-      "Action": "lambda:InvokeFunction",
-      "Resource": [
-        "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:aiops-fetch-logs",
-        "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:aiops-fetch-metrics",
-        "arn:aws:lambda:$REGION:$ACCOUNT_ID:function:aiops-fetch-health"
-      ]
-    },
-    {
-      "Sid": "InvokeBedrockModels",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ],
-      "Resource": "arn:aws:bedrock:$REGION::foundation-model/*"
-    }
-  ]
-}
-EOF
-)
+echo ""
+echo "[3/4] Ensuring Log Analytics Reader role assignment..."
+SP_OBJECT_ID="$(az ad sp show --id "$CLIENT_ID" --query id -o tsv)"
 
-aws iam put-role-policy \
-  --role-name "$AGENT_ROLE_NAME" \
-  --policy-name "aiops-bedrock-agent-inline-policy" \
-  --policy-document "$AGENT_INLINE_POLICY"
-echo "  ✓ Inline policy applied: Lambda invoke + Bedrock model invoke"
+if az role assignment list \
+  --assignee "$SP_OBJECT_ID" \
+  --scope "$WORKSPACE_RESOURCE_ID" \
+  --query "[?roleDefinitionName=='Log Analytics Reader']" -o tsv | grep -q .; then
+  echo "  Role already assigned."
+else
+  az role assignment create \
+    --assignee "$SP_OBJECT_ID" \
+    --role "Log Analytics Reader" \
+    --scope "$WORKSPACE_RESOURCE_ID" >/dev/null
+  echo "  Assigned Log Analytics Reader."
+fi
+
+echo ""
+echo "[4/4] Function App settings..."
+if [ -n "$FUNCTION_APP_NAME" ]; then
+  if [ -z "$CLIENT_SECRET" ]; then
+    echo "  Existing service principal found, but no client secret is available."
+    echo "  Create a new secret and set AZURE_CLIENT_SECRET manually:"
+    echo "    az ad app credential reset --id $CLIENT_ID"
+  else
+    SETTINGS=(
+      "LOG_ANALYTICS_WORKSPACE_ID=$WORKSPACE_ID"
+      "AZURE_TENANT_ID=$TENANT_ID"
+      "AZURE_CLIENT_ID=$CLIENT_ID"
+      "AZURE_CLIENT_SECRET=$CLIENT_SECRET"
+    )
+
+    if [ -n "$PROMETHEUS_URL" ]; then
+      SETTINGS+=("PROMETHEUS_URL=$PROMETHEUS_URL")
+    fi
+
+    az functionapp config appsettings set \
+      --resource-group "$RESOURCE_GROUP" \
+      --name "$FUNCTION_APP_NAME" \
+      --settings "${SETTINGS[@]}" >/dev/null
+    echo "  Updated app settings on Function App: $FUNCTION_APP_NAME"
+  fi
+else
+  echo "  FUNCTION_APP_NAME is not set, so no app settings were written."
+fi
 
 echo ""
 echo "============================================="
-echo " Done!"
+echo " Done"
 echo "============================================="
 echo ""
-echo " Roles created:"
-echo "  - $LAMBDA_ROLE_NAME"
-echo "    ARN: arn:aws:iam::$ACCOUNT_ID:role/$LAMBDA_ROLE_NAME"
-echo ""
-echo "  - $AGENT_ROLE_NAME"
-echo "    ARN: arn:aws:iam::$ACCOUNT_ID:role/$AGENT_ROLE_NAME"
-echo ""
-echo " Next step: Create the 3 Lambda functions in AWS Console"
-echo "   and assign '$LAMBDA_ROLE_NAME' as their execution role."
+echo "Use these values in your Azure Function App settings:"
+echo "  LOG_ANALYTICS_WORKSPACE_ID=$WORKSPACE_ID"
+echo "  AZURE_TENANT_ID=$TENANT_ID"
+echo "  AZURE_CLIENT_ID=$CLIENT_ID"
+if [ -n "$CLIENT_SECRET" ]; then
+  echo "  AZURE_CLIENT_SECRET=$CLIENT_SECRET"
+else
+  echo "  AZURE_CLIENT_SECRET=<create/reset a client secret for this app>"
+fi
+echo "  PROMETHEUS_URL=${PROMETHEUS_URL:-http://<prometheus-loadbalancer>:9090}"
 echo ""
