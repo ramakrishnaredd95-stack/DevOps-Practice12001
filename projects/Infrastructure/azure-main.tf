@@ -49,6 +49,7 @@ module "eks" {
 }
 
 module "argocd" {
+  count  = var.deploy_cluster_addons ? 1 : 0
   source = "./modules/argocd"
 
   providers = {

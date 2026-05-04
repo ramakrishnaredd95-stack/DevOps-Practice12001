@@ -108,6 +108,12 @@ variable "acr_admin_enabled" {
   default     = false
 }
 
+variable "deploy_cluster_addons" {
+  description = "Deploy Kubernetes and Helm resources after the AKS cluster exists."
+  type        = bool
+  default     = false
+}
+
 variable "repositories" {
   description = "Logical container repositories expected to be pushed into ACR."
   type        = list(string)
