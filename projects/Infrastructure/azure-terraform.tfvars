@@ -31,8 +31,8 @@ acr_name          = "boutiqueacr"
 acr_sku           = "Standard"
 acr_admin_enabled = false
 
-# AKS already exists, so enable Helm/Kubernetes addons during apply.
-deploy_cluster_addons = true
+# Keep this false for the first apply. Set it to true only after AKS exists.
+deploy_cluster_addons = false
 
 repositories = [
   "frontend",

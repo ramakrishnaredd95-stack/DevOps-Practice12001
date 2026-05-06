@@ -1,9 +1,6 @@
-name: Boutique CI Pipeline (Feature Branch)
+name: Boutique CI Pipeline
 
 on:
-  push:
-    branches:
-      - 'feature/*'
   workflow_dispatch:
 
 env:
@@ -17,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      fail-fast: false
       matrix:
         service:
           - auth
@@ -31,11 +27,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Login to Azure Container Registry
         uses: docker/login-action@v2
@@ -43,15 +34,27 @@ jobs:
           registry: ${{ env.AZURE_REGISTRY }}
           username: ${{ env.REGISTRY_USERNAME }}
           password: ${{ env.REGISTRY_PASSWORD }}
+     
+      - name: Build Docker Image
+        run: |
+          if [ "${{ matrix.service }}" == "frontend" ]; then
+            BUILD_PATH="projects/boutique-microservices/frontend"
+          else
+            BUILD_PATH="projects/boutique-microservices/backend/services/${{ matrix.service }}"
+          fi
 
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ matrix.service == 'frontend' && 'projects/boutique-microservices/frontend' || format('projects/boutique-microservices/backend/services/{0}', matrix.service) }}
-          push: true
-          tags: ${{ env.AZURE_REGISTRY }}/${{ matrix.service }}:${{ env.IMAGE_TAG }}
-          cache-from: type=registry,ref=${{ env.AZURE_REGISTRY }}/${{ matrix.service }}:buildcache
-          cache-to: type=registry,ref=${{ env.AZURE_REGISTRY }}/${{ matrix.service }}:buildcache,mode=max
+          echo "Building from $BUILD_PATH"
+
+          docker build \
+            -t ${{ env.AZURE_REGISTRY }}/${{ matrix.service }}:${{ env.IMAGE_TAG }} \
+          $BUILD_PATH
+
+
+      - name: Push Docker Image
+        run: |
+          IMAGE_URI=${{ env.AZURE_REGISTRY }}/${{ matrix.service }}:${{ env.IMAGE_TAG }}
+          echo "Pushing $IMAGE_URI"
+          docker push $IMAGE_URI
 
   update-manifests:
     runs-on: ubuntu-latest
@@ -63,7 +66,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update image tags in k8s manifests
@@ -73,31 +75,16 @@ jobs:
 
           for SERVICE in auth gateway orders order-service product-service user-service; do
             MANIFEST="gitops/k8s/backend/${SERVICE}.yml"
-            if [ -f "$MANIFEST" ]; then
-              sed -i "s|\(${REGISTRY}/${SERVICE}:\).*|\1${NEW_TAG}|g" $MANIFEST
-            fi
+            sed -i "s|${REGISTRY}/${SERVICE}:.*|${REGISTRY}/${SERVICE}:${NEW_TAG}|g" $MANIFEST
           done
 
-          FRONTEND_MANIFEST="gitops/k8s/frontend/deployment.yml"
-          if [ -f "$FRONTEND_MANIFEST" ]; then
-            sed -i "s|\(${REGISTRY}/frontend:\).*|\1${NEW_TAG}|g" $FRONTEND_MANIFEST
-          fi
+          sed -i "s|${REGISTRY}/frontend:.*|${REGISTRY}/frontend:${NEW_TAG}|g" gitops/k8s/frontend/deployment.yml
 
-      - name: Commit and push updated manifests to feature branch
+      - name: Commit and push updated manifests
         run: |
           git config user.name "github-actions"
-          
-
-          
           git config user.email "github-actions@github.com"
-
-          BRANCH_NAME=${GITHUB_REF#refs/heads/}
-
           git add gitops/k8s/
+          git diff --staged --quiet || git commit -m "ci: update image tags to ${{ github.sha }}"
+          git push
 
-          if ! git diff --staged --quiet; then
-            git commit -m "ci(feature): update image tags to ${{ github.sha }}"
-            git push origin $BRANCH_NAME
-          else
-            echo "No changes to commit"
-          fi
