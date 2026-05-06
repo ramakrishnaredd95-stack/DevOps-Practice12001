@@ -32,7 +32,7 @@ acr_sku           = "Standard"
 acr_admin_enabled = false
 
 # Keep this false for the first apply. Set it to true only after AKS exists.
-deploy_cluster_addons = false
+deploy_cluster_addons = true
 
 repositories = [
   "frontend",
