@@ -18,6 +18,15 @@ resources:
   - k8s/frontend/deployment.yml
   - k8s/grafana-dashboard.yml
 
+patches:
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: azure-acr-secret
+
 configMapGenerator:
   - name: boutique-db-dump
     files:
