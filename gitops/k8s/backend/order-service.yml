@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: order-service
-          image: boutiqueacr.azurecr.io/order-service:f3b942f7978bdf7f33d0bf75db559ee8de8765a3
+          image: boutiqueacr.azurecr.io/order-service:be91cd535a86ef10b7d50e799288aad86ff66e1e
           ports:
             - containerPort: 3004
           env:
