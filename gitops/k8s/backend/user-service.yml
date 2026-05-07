@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: user-service
-          image: boutiqueacr.azurecr.io/user-service:be91cd535a86ef10b7d50e799288aad86ff66e1e
+          image: boutiqueacr.azurecr.io/user-service:475de99055dc6562a3dda2220ba649a1de7ecc87
           ports:
             - containerPort: 3006
           env:
