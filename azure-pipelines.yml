@@ -1,12 +1,12 @@
 trigger:
   branches:
     include:
-      - main
+      - project-demo
 
 pr:
   branches:
     include:
-      - main
+      - project-demo
 
 variables:
   # Create this Docker Registry service connection in Azure DevOps.
