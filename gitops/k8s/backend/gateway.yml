@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: boutiqueacr.azurecr.io/gateway:fef7018d229b55ffa0300e6f4003b0d2818727b4
+          image: boutiqueacr.azurecr.io/gateway:dca165f48efb76bb6e99c6e1aedff052c2fcdc60
           ports:
             - containerPort: 3001
           env:
