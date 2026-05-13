@@ -4,8 +4,8 @@ resource "azurerm_resource_group" "main" {
   tags     = var.tags
 }
 
-module "vpc" {
-  source = "./modules/vpc"
+module "vnet" {
+  source = "./modules/vnet"
 
   vnet_name           = var.vnet_name
   resource_group_name = azurerm_resource_group.main.name
@@ -15,8 +15,8 @@ module "vpc" {
   tags                = var.tags
 }
 
-module "ecr" {
-  source = "./modules/ecr"
+module "acr" {
+  source = "./modules/acr"
 
   acr_name            = replace(var.acr_name, "-", "")
   resource_group_name = azurerm_resource_group.main.name
@@ -27,15 +27,15 @@ module "ecr" {
   tags                = var.tags
 }
 
-module "eks" {
-  source = "./modules/eks"
+module "aks" {
+  source = "./modules/aks"
 
   cluster_name        = var.cluster_name
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   dns_prefix          = var.cluster_name
-  subnet_id           = module.vpc.subnet_ids[var.aks_subnet_name]
-  acr_id              = module.ecr.acr_id
+  subnet_id           = module.vnet.subnet_ids[var.aks_subnet_name]
+  acr_id              = module.acr.acr_id
   kubernetes_version  = var.kubernetes_version
   node_pool_name      = var.node_pool_name
   node_count          = var.node_count
@@ -55,6 +55,6 @@ module "argocd" {
     kubernetes = kubernetes.aks
     helm       = helm.aks
   }
+  depends_on = [module.aks]
 
-  depends_on = [module.eks]
 }

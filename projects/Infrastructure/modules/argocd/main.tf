@@ -1,10 +1,12 @@
 resource "kubernetes_namespace_v1" "argocd" {
+
   metadata {
     name = "argocd"
   }
 }
 
 resource "kubernetes_namespace_v1" "monitoring" {
+
   metadata {
     name = "monitoring"
   }
@@ -53,8 +55,12 @@ resource "helm_release" "monitoring" {
   chart      = "kube-prometheus-stack"
   version    = "56.21.0"
 
-  timeout          = 600
-  create_namespace = false
+  timeout           = 1800
+  wait              = true
+  atomic            = true
+  cleanup_on_fail   = true
+  dependency_update = true
+  create_namespace  = false
 
   values = [
     yamlencode({
@@ -79,6 +85,7 @@ resource "helm_release" "monitoring" {
   ]
 
   depends_on = [
-    kubernetes_namespace_v1.monitoring
+    kubernetes_namespace_v1.monitoring,
+    helm_release.argocd
   ]
 }

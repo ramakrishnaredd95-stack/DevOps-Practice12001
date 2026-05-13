@@ -1,5 +1,5 @@
 azure_subscription_id = null
-azure_region          = "eastus"
+azure_region          = "canadacentral"
 resource_group_name   = "boutique-rg"
 
 vnet_name          = "boutique-vnet"
