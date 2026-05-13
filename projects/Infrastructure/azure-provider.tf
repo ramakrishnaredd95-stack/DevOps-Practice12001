@@ -6,6 +6,7 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 3.0"
     }
+<<<<<<< HEAD
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
@@ -14,6 +15,8 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 3.0"
     }
+=======
+>>>>>>> 1f105379fa083ff7352a1e8dbd180cf5024b433d
   }
 }
 
@@ -21,6 +24,7 @@ provider "azurerm" {
   features {}
   subscription_id = var.azure_subscription_id
 }
+<<<<<<< HEAD
 
 provider "kubernetes" {
   alias                  = "aks"
@@ -40,3 +44,5 @@ provider "helm" {
     cluster_ca_certificate = base64decode(module.aks.cluster_certificate_authority_data)
   }
 }
+=======
+>>>>>>> 1f105379fa083ff7352a1e8dbd180cf5024b433d

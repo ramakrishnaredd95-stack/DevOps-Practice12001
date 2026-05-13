@@ -20,6 +20,7 @@ provider "registry.terraform.io/hashicorp/azurerm" {
     "zh:f569b65999264a9416862bca5cd2a6177d94ccb0424f3a4ef424428912b9cb3c",
   ]
 }
+<<<<<<< HEAD
 
 provider "registry.terraform.io/hashicorp/helm" {
   version     = "3.1.1"
@@ -60,3 +61,5 @@ provider "registry.terraform.io/hashicorp/kubernetes" {
     "zh:faf23e45f0090eef8ba28a8aac7ec5d4fdf11a36c40a8d286304567d71c1e7db",
   ]
 }
+=======
+>>>>>>> 1f105379fa083ff7352a1e8dbd180cf5024b433d
