@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: product-service
-          image: boutiqueacr.azurecr.io/product-service:350d88f80cc1b802abe7e12da477603c5b881421
+          image: boutiqueacr.azurecr.io/product-service:71a67fa54120aa775bc8bb4d5615c3b3813ec343
           ports:
             - containerPort: 3003
           env:
