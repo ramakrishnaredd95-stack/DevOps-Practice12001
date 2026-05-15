@@ -49,13 +49,12 @@ module "aks" {
 }
 
 module "argocd" {
-  count  = var.deploy_cluster_addons ? 1 : 0
   source = "./modules/argocd"
 
-  providers = {
-    kubernetes = kubernetes.aks
-    helm       = helm.aks
-  }
+  aks_cluster_id      = module.aks.cluster_id
+  resource_group_name = azurerm_resource_group.main.name
+  cluster_name        = module.aks.cluster_name
+
   depends_on = [module.aks]
 
 }
