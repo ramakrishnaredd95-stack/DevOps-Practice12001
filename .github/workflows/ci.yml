@@ -1,18 +1,8 @@
 name: Boutique CI Pipeline
 
 on:
-  push:
-    branches:
-      - project-demo
-    paths-ignore:
-      - 'gitops/**'
-
   workflow_dispatch:
 
-concurrency:
-  group: boutique-ci
-  cancel-in-progress: false
-  
 env:
   AZURE_REGISTRY: ${{ secrets.AZURE_REGISTRY_URL }}
   REGISTRY_USERNAME: ${{ secrets.AZURE_REGISTRY_USERNAME }}
